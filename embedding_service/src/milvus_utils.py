@@ -77,7 +77,6 @@ def search_milvus(collection_name, query_vector, host, port, top_k=5):
 
     # collection
     # Perform search
-    print(query_vector)
     results = client.search(
         collection_name=collection_name,
         data=query_vector, 
@@ -87,7 +86,6 @@ def search_milvus(collection_name, query_vector, host, port, top_k=5):
         output_fields=["person_id", "image_name"],
         consistency_level="Strong"
     )
-    results = json.dumps(results, indent=4)
     return results    
 
 

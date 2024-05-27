@@ -14,7 +14,7 @@ from src.milvus_utils import (
     create_embeddings_from_minio_images,
 )
 from src.minio_utils import load_model_weights
-
+from utils import find_most_common_person_id
 
 minio_access_key = "minioadmin"
 minio_secret_key = "minioadmin"
@@ -101,7 +101,20 @@ async def search_images(image: UploadFile):
         similar_images = search_milvus(
             milvus_collection_name, embedding, milvus_host, milvus_port, 25
         )
-        return similar_images
+        most_common, number_of_occurances = find_most_common_person_id(similar_images)
+        auth_result = {
+            'person_id': most_common,
+            'number_of_occurances': number_of_occurances,
+            'authorized': False
+        }
+
+        if number_of_occurances >= 3:
+            auth_result['authorized'] = True
+        
+        result = similar_images
+        result.append(auth_result)    
+        
+        return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

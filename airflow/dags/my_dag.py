@@ -91,8 +91,8 @@ def store_in_minio(**context):
 
     minio_client = Minio(
         "minio:9000",
-        access_key="adminadmin",
-        secret_key="adminadmin",
+        access_key="minioadmin",
+        secret_key="minioadmin",
         secure=False
     )
 
