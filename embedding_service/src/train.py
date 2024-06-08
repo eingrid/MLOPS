@@ -6,7 +6,8 @@ import torch
 import torch.optim as optim
 from torch.nn.functional import pairwise_distance
 from tqdm import tqdm
-
+import mlflow
+from mlflow.models import infer_signature
 
 def train_siamese_network(
     minio_host,
@@ -23,34 +24,6 @@ def train_siamese_network(
     base_model="custom",
     margin=1,
 ):
-    """_summary_
-
-    Parameters
-    ----------
-    minio_host : _type_
-        _description_
-    minio_access_key : _type_
-        _description_
-    minio_secret_key : _type_
-        _description_
-    minio_bucket_name : _type_
-        _description_
-    device : _type_
-        _description_
-    num_epochs : int, optional
-        _description_, by default 10
-    batch_size : int, optional
-        _description_, by default 2
-    lr : float, optional
-        _description_, by default 0.001
-    validation_split : float, optional
-        _description_, by default 0.2
-    train_whole : bool, optional
-        _description_, by default False
-    base_model : str, optional
-        Type of the model to use, available options 'custom', 'effnet', by default 'custom'
-    """
-
     # Define the transformations for images
     transform = transforms.Compose(
         [
@@ -91,8 +64,8 @@ def train_siamese_network(
     # Initialize your Siamese Network and move it to the specified device
     net = SiameseNetwork(cnn, fc).to(device)
 
-    # Train only head of the network is train_whole is False
-    if train_whole == False:
+    # Train only head of the network if train_whole is False
+    if not train_whole:
         for param in net.cnn.parameters():
             param.requires_grad = False
 
@@ -101,8 +74,20 @@ def train_siamese_network(
 
     # Define the optimizer
     optimizer = optim.Adam(net.parameters(), lr=lr)
-    validation_loss_best = 0
     validation_accuracy_best = 0
+
+    # Start an MLflow run
+    mlflow.start_run()
+
+    # Log parameters
+    mlflow.log_param("num_epochs", num_epochs)
+    mlflow.log_param("batch_size", batch_size)
+    mlflow.log_param("lr", lr)
+    mlflow.log_param("validation_split", validation_split)
+    mlflow.log_param("train_whole", train_whole)
+    mlflow.log_param("base_model", base_model)
+    mlflow.log_param("margin", margin)
+
     # Training loop
     for epoch in range(num_epochs):
         train_loss = 0.0
@@ -148,9 +133,15 @@ def train_siamese_network(
 
                 tepoch.set_postfix(loss=loss.item(), accuracy=correct / total)
 
+            avg_train_loss = train_loss / len(tepoch)
+            train_accuracy = correct / total
             tepoch.write(
-                f"Epoch {epoch}, Avg Train Loss: {train_loss / len(tepoch)}, Accuracy: {correct / total}"
+                f"Epoch {epoch}, Avg Train Loss: {avg_train_loss}, Accuracy: {train_accuracy}"
             )
+
+            # Log metrics
+            mlflow.log_metric("train_loss", avg_train_loss, step=epoch)
+            mlflow.log_metric("train_accuracy", train_accuracy, step=epoch)
 
         # Validation loop
         validation_loss = 0.0
@@ -191,27 +182,55 @@ def train_siamese_network(
                 tval.set_postfix(
                     loss=loss.item(), accuracy=correct_val / total_val
                 )
-            if validation_accuracy_best < correct_val / total_val:
-                validation_accuracy_best = correct_val / total_val
-                torch.save(net.state_dict(), "siamese_model_best.pth")
-                #save json with metrics
-                metrics = {'validation_loss': validation_loss, 'validation_accuracy': correct_val / total_val}
-                json.dump(metrics, open("metrics.json", 'w'))
-                
+
+            avg_validation_loss = validation_loss / len(tval)
+            validation_accuracy = correct_val / total_val
             tval.write(
-                f"Epoch {epoch}, Avg Validation Loss: {validation_loss / len(tval)}, Accuracy: {correct_val / total_val}"
+                f"Epoch {epoch}, Avg Validation Loss: {avg_validation_loss}, Accuracy: {validation_accuracy}"
             )
 
-    # Save your model
-    torch.save(net.state_dict(), "siamese_model_last.pth")
+            # Log metrics
+            mlflow.log_metric("validation_loss", avg_validation_loss, step=epoch)
+            mlflow.log_metric("validation_accuracy", validation_accuracy, step=epoch)
 
+            if validation_accuracy_best < validation_accuracy:
+                validation_accuracy_best = validation_accuracy
+                torch.save(net.state_dict(), "siamese_model_best.pth")
+                mlflow.log_artifact("siamese_model_best.pth")
+
+                # Save json with metrics
+                metrics = {'validation_loss': avg_validation_loss, 'validation_accuracy': validation_accuracy}
+                with open("metrics.json", 'w') as f:
+                    json.dump(metrics, f)
+                mlflow.log_artifact("metrics.json")
+
+    # Save your final model
+    torch.save(net.state_dict(), "siamese_model_last.pth")
+    mlflow.log_artifact("siamese_model_last.pth")
+
+    # Generate three input samples (representing anchor, positive, and negative images)
+    anchor_input = torch.randn(1, 3, 128, 128)  # Assuming shape [batch_size, channels, height, width]
+    positive_input = torch.randn(1, 3, 128, 128)
+    negative_input = torch.randn(1, 3, 128, 128)
+
+    # Pass the input samples through the model to get the output embeddings
+    anchor_output, positive_output, negative_output = net(anchor_input, positive_input, negative_input)
+
+    # Infer the signature using the output embeddings
+    signature = infer_signature(anchor_output.cpu().detach().numpy(), positive_output.cpu().detach().numpy())
+
+    mlflow.pytorch.log_model(net, "model", signature=signature)
+
+    # End the MLflow run
+    mlflow.end_run()
 
 # Example usage
 if __name__ == "__main__":
-    minio_host = "localhost:9000"
+    minio_host = "minio:9000"
     minio_access_key = "minioadmin"
     minio_secret_key = "minioadmin"
     minio_bucket_name = "user-data"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_siamese_network(
-        minio_host, minio_access_key, minio_secret_key, minio_bucket_name, batch_size=32
+        minio_host, minio_access_key, minio_secret_key, minio_bucket_name, device, batch_size=32
     )

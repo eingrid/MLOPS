@@ -130,3 +130,24 @@ def recompute_embeddings():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/train")
+def train():
+    minio_host = "minio:9000"
+    minio_access_key = "minioadmin"
+    minio_secret_key = "minioadmin"
+    minio_bucket_name = "user-data"
+    train_siamese_network(
+        minio_host,
+        minio_access_key,
+        minio_secret_key,
+        minio_bucket_name,
+        batch_size=64,
+        device="cpu",
+        lr=0.001,
+        num_epochs=1,
+        base_model="effnet",
+        num_triplets_per_person=1,
+        margin=10
+    )

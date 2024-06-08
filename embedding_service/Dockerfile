@@ -7,13 +7,12 @@ WORKDIR /app
 # Copy the requirements file
 COPY requirements.txt .
 
+RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
+
 # Install the dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-RUN pip install fastapi 
-
-RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
-RUN pip install pymilvus
+RUN pip install boto3
 
 # Copy the source code
 COPY . .
